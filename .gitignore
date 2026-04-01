@@ -1,0 +1,11 @@
+venv/
+__pycache__/
+*.pyc
+*.ipynb
+*.csv
+*.pkl
+*.pt
+*.h5
+.env
+
+mergekit/
