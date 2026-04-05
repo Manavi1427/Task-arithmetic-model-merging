@@ -1,83 +1,75 @@
-#writes yaml file for every combination of tasks and lambda
-
-import subprocess
-import yaml
-import os
+import os 
 import time
-import sys
+import torch
+import yaml
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-BASE_MODEL = "distilbert-base-uncased"
+BASE_MODEL= "distilbert-base-uncased"
 
-tasks=["sst2","mrpc","rte"]
+#loads model from disk and returns its weights as dict (key=layerName: Value=tensors)
+def load_weights(model_path):
+    model = AutoModelForSequenceClassification.from_pretrained(
+        model_path,num_labels=2
+    )
+    return {name: param.clone() for name, param in model.named_parameters()}
 
-def task_config(tasks, lam, method= "task-arithmetic"):
-    models=[{"model": BASE_MODEL}]           #theta - Base model no weights
+def task_arithmetic_merge(base_weights, finetuned_weights_list, lam):
+    merged={}
+    for name, base_param in base_weights.items():
+        task_vector_sum = torch.zeros_like(base_param)    #for task vectors
+        for ft_weights in finetuned_weights_list:
+            if name in ft_weights:
+                tau= ft_weights[name] - base_param    
+                task_vector_sum +=tau
 
+        merged[name] = base_param + lam*task_vector_sum
+    return merged 
+
+def save_merged_model(base_path, merged_weights, output_dir):
+    os.makedirs(output_dir, exist_ok=True)
+    model = AutoModelForSequenceClassification.from_pretrained(
+        base_path, num_labels=2
+    )
+    state_dict=model.state_dict()
+    for name, param in merged_weights.items():
+        if name in state_dict:
+            state_dict[name] = param
+        model.load_state_dict(state_dict)
+        model.save_pretrained(output_dir)
+
+        #save tokenizer
+        tokenizer = AutoTokenizer.from_pretrained(base_path)
+        tokenizer.save_pretrained(output_dir)
+
+def run_merge(tasks, lam, output_dir):
+    start= time.time()
+    print(f"\nMerging {tasks} at λ={lam}")
+
+    print("  Loading base model weights...")
+    base_weights= load_weights(BASE_MODEL)
+
+    print("  loading finetuned weights...")
+    finetuned_weights_list=[]
     for task in tasks:
-        models.append({
-            "model": f"models/finetuned_{task}",
-            "parameter": {"weight": lam}
-        })
+        path = f"models/finetuned_{task}"
+        print(f"  Loading {path}")
+        finetuned_weights_list.append(load_weights(path))
     
-    config={
-        "method": method,
-            "base_model": BASE_MODEL,
-            "models": models,
-            "parameters": {"normalize: False"},
-            "dtype": "float32"
-    }
-
-    os.makedirs("configs", exist_ok=True)
-    tag="_".join(tasks)
-    path=f"configs/{method}_{tag}_1{str(lam).replace(".","")}.yaml"
-
-    with open(path, "w") as f:
-        yaml.dump(config,f)
-
-    return path
-
-def run_merge(config_path, output_dir):
-    os.makedirs("output_dir", exist_ok=True)
-    start=time.time()
-
-    # find mergekit-yaml relative to current python executable
-    python_dir = os.path.dirname(sys.executable)
-    mergekit_cmd = os.path.join(python_dir, "mergekit-yaml.exe")
-
-    subprocess.run([
-        mergekit_cmd, config_path, output_dir,
-        "--copy-tokenizer",
-        "--allow-crimes",
-        "--out-shard-size", "1B",
-        "--lazy-unpickle",
-        "--device", "cpu"
-    ], check=True)
-
-    #subprocess.run([
-        #"mergekit-yaml", config_path, output_dir,
-        #"--copy-tokenizer",      # copies tokenizer from base model to output
-        #"--allow-crimes",        # enables CPU merging
-        #"--out-shard-size", "1B",  # chunks output to avoid RAM overflow
-        #"--lazy-unpickle",      # loads weights one at a time, saves RAM
-        #"--device", "cpu"       # explicit CPU
-    #], check=True)
-
-    elapsed = round((time.time()-start)/60,2)
-
-    #log compute time
-    os.makedirs("results",exist_ok=True)
+    print("  Computing task vectors and merging...")
+    merged_weights = task_arithmetic_merge(base_weights, finetuned_weights_list, lam)
+    
+    print(f"  Saving merged model to {output_dir}...")
+    save_merged_model(BASE_MODEL, merged_weights, output_dir)
+    elapsed = round((time.time() - start)/60,2)
     with open("results/compute_log.txt", "a") as f:
-        f.write(f"merge,{output_dir},{elapsed}\n")
+        f.write(f"merged,{output_dir},{elapsed}\n")
+    print(f"Done → {output_dir} ({elapsed} min)")
 
-    print(f"Merged-> {output_dir} ({elapsed} min)")
 
 if __name__=="__main__":
     lambdas = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
     tasks=["sst2","mrpc","rte"]
 
     for lam in lambdas:
-        cfg= task_config(tasks,lam)
-        out_dir=f"models/merged/lambda_{str(lam).replace(".","_")}"
-        run_merge(cfg, out_dir)
-
-
+        out_dir = f"models/merged/lambda_{str(lam).replace('.','_')}"
+        run_merge(tasks, lam, out_dir)

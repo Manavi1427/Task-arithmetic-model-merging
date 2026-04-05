@@ -8,7 +8,13 @@ __pycache__/
 *.h5
 .env
 
+venv311/
+
 mergekit/
 results/
-models/
+models/finetuned_mrpc
+models/finetuned_rte
+models/finetuned_sst2
+models/merged
 output_dir/
+

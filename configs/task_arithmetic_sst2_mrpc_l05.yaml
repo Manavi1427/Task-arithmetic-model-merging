@@ -1,0 +1,13 @@
+base_model: distilbert-base-uncased
+dtype: float32
+merge_method: task_arithmetic
+models:
+- model: distilbert-base-uncased
+- model: models/finetuned_sst2
+  parameters:
+    weight: 0.5
+- model: models/finetuned_mrpc
+  parameters:
+    weight: 0.5
+parameters:
+  normalize: false

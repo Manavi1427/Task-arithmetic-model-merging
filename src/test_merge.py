@@ -1,6 +1,4 @@
-from merge import task_config, run_merge
+from merge import run_merge
 
-cfg = task_config(["sst2", "mrpc"], 0.5)
-run_merge(cfg, "models/merged/test_run")
+run_merge(["sst2", "mrpc"], 0.5, "models/merged/test_run")
 print("test merge done")
-
