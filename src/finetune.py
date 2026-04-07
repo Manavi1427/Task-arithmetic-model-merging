@@ -15,7 +15,7 @@ import evaluate
 import os 
 import numpy as np
 
-BASE_MODEL = "distilbert-base-uncased"
+BASE_MODEL = "distilbert-base-uncased"         #66M params 
 
 TASK_CONFIG = {
     #sentiment analysis
